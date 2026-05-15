@@ -233,28 +233,42 @@
     })();
 
     /* ══════════════════════════════════════
-       ENABLE APPS — real listApps via Luna
+       hbchannel exec helper
+       ══════════════════════════════════════ */
+
+    function hbExec(cmd, cb) {
+        if (!window.webOS || !window.webOS.service) { cb(null, 'webOS service not available'); return; }
+        window.webOS.service.request('luna://org.webosbrew.hbchannel.service', {
+            method: 'exec',
+            parameters: { command: cmd },
+            onSuccess: function(r) { cb(r.output || r.stdout || '', null); },
+            onFailure: function(e) { cb(null, e.errorText || JSON.stringify(e)); }
+        });
+    }
+
+    /* ══════════════════════════════════════
+       ENABLE APPS — via hbchannel exec
+       luna-send listApps, parse JSON output
        ══════════════════════════════════════ */
 
     function loadApps() {
         loadingSpinner.classList.add('visible');
-        if (!window.webOS || !window.webOS.service) {
-            loadingSpinner.classList.remove('visible');
-            showNoApps('webOS service not available.');
-            return;
-        }
-        window.webOS.service.request('luna://com.webos.applicationManager', {
-            method: 'listApps',
-            parameters: {},
-            onSuccess: function(res) {
+        /* Ask the TV for the full app list via luna-send as root through hbchannel.
+           luna-send -n 1 -f returns a pretty-printed JSON response. */
+        hbExec(
+            "luna-send -n 1 -f luna://com.webos.applicationManager/listApps '{}'",
+            function(out, err) {
                 loadingSpinner.classList.remove('visible');
-                renderApps(res.apps || []);
-            },
-            onFailure: function(err) {
-                loadingSpinner.classList.remove('visible');
-                showNoApps('listApps failed: ' + (err.errorText || JSON.stringify(err)));
+                if (err) { showNoApps('hbchannel exec failed: ' + err); return; }
+                try {
+                    var res = JSON.parse(out);
+                    if (!res.returnValue) { showNoApps('listApps returned false: ' + (res.errorText || out)); return; }
+                    renderApps(res.apps || []);
+                } catch(e) {
+                    showNoApps('Parse error: ' + e.message + '\nRaw: ' + (out||'').substr(0,200));
+                }
             }
-        });
+        );
     }
 
     function showNoApps(msg) {
@@ -302,12 +316,9 @@
     }
 
     function launchApp(id) {
-        if (!window.webOS || !window.webOS.service) return;
-        window.webOS.service.request('luna://com.webos.applicationManager', {
-            method: 'launch',
-            parameters: { id: id },
-            onSuccess: function() { console.log('Launched: ' + id); },
-            onFailure: function(e) { console.error('Launch failed: ' + JSON.stringify(e)); }
+        hbExec("luna-send -n 1 luna://com.webos.applicationManager/launch '{\"id\":\"" + id + "\"}'", function(out, err) {
+            if (err) console.error('Launch failed: ' + err);
+            else console.log('Launched ' + id + ': ' + out);
         });
     }
 
@@ -326,16 +337,23 @@
        falls back to luna://com.webos.service.systemservice/logRead.
        ══════════════════════════════════════ */
 
-    var syslogActive = false;
-    var syslogHandle = null;
-    var MAX_LINES    = 600;
+    /* ══════════════════════════════════════
+       REAL SYSLOG — via hbchannel exec
+       Polls logread (busybox syslog reader)
+       or falls back to tail /var/log/messages
+       ══════════════════════════════════════ */
+
+    var syslogActive  = false;
+    var syslogTimer   = null;
+    var lastLogStamp  = '';   // track last line seen to only append new lines
+    var MAX_LINES     = 600;
 
     function appendLog(line) {
         var filter = (logFilter.value || '').trim().toLowerCase();
         var div = document.createElement('div');
         var lower = line.toLowerCase();
-        if (lower.indexOf('[err') !== -1 || lower.indexOf('error') !== -1) div.className = 'log-err';
-        else if (lower.indexOf('[warn') !== -1 || lower.indexOf('warning') !== -1) div.className = 'log-warn';
+        if (lower.indexOf('err') !== -1)  div.className = 'log-err';
+        else if (lower.indexOf('warn') !== -1) div.className = 'log-warn';
         div.textContent = line;
         if (filter && lower.indexOf(filter) === -1) div.style.display = 'none';
         logViewport.appendChild(div);
@@ -343,53 +361,40 @@
         logViewport.scrollTop = logViewport.scrollHeight;
     }
 
-    function flushPayload(res) {
+    function pollSyslog() {
         if (!syslogActive) return;
-        var raw = res.logData || res.lines || res.logMsg || res.message || res.payload || null;
-        if (!raw) { appendLog(JSON.stringify(res)); return; }
-        if (typeof raw === 'string') {
-            raw.split('\n').forEach(function(l) { if (l.trim()) appendLog(l); });
-        } else if (Array.isArray(raw)) {
-            raw.forEach(function(l) { appendLog(typeof l === 'string' ? l : JSON.stringify(l)); });
-        } else {
-            appendLog(JSON.stringify(raw));
-        }
+        /* logread -n 50 fetches last 50 kernel/syslog lines.
+           We diff against lastLogStamp to only show new lines each poll. */
+        hbExec('logread -n 50 2>/dev/null || tail -n 50 /var/log/messages 2>/dev/null || dmesg | tail -n 50', function(out, err) {
+            if (!syslogActive) return;
+            if (err) { appendLog('[ERR] ' + err); return; }
+            var lines = (out || '').split('\n').filter(function(l){ return l.trim(); });
+            if (!lines.length) return;
+            /* Find where new content starts after lastLogStamp */
+            var startIdx = 0;
+            if (lastLogStamp) {
+                for (var i = lines.length - 1; i >= 0; i--) {
+                    if (lines[i] === lastLogStamp) { startIdx = i + 1; break; }
+                }
+            }
+            var newLines = startIdx > 0 ? lines.slice(startIdx) : (lastLogStamp ? [] : lines);
+            newLines.forEach(function(l) { appendLog(l); });
+            if (lines.length > 0) lastLogStamp = lines[lines.length - 1];
+            /* Poll again after 2 seconds */
+            if (syslogActive) syslogTimer = setTimeout(pollSyslog, 2000);
+        });
     }
 
     function startSyslog() {
         syslogSection.classList.add('visible');
-        syslogActive = true;
-
-        if (!window.webOS || !window.webOS.service) {
-            appendLog('[WARN] webOS service not available — cannot stream real syslog.');
-            return;
-        }
-
-        /* Try pmlogd first, fall back to systemservice */
-        syslogHandle = window.webOS.service.request('luna://com.webos.pmlogd', {
-            method: 'getLogData',
-            parameters: { subscribe: true, numLines: 100 },
-            subscribe: true,
-            onSuccess: function(res) { flushPayload(res); },
-            onFailure: function(err) {
-                appendLog('[WARN] pmlogd: ' + (err.errorText || err.errorCode || JSON.stringify(err)) + ' — trying systemservice…');
-                syslogHandle = window.webOS.service.request('luna://com.webos.service.systemservice', {
-                    method: 'logRead',
-                    parameters: { subscribe: true },
-                    subscribe: true,
-                    onSuccess: function(res) { flushPayload(res); },
-                    onFailure: function(err2) {
-                        appendLog('[ERR] Both syslog methods failed: ' + (err2.errorText || JSON.stringify(err2)));
-                    }
-                });
-            }
-        });
+        syslogActive  = true;
+        lastLogStamp  = '';
+        pollSyslog();
     }
 
     function stopSyslog() {
         syslogActive = false;
-        if (syslogHandle && syslogHandle.cancel) try { syslogHandle.cancel(); } catch(e) {}
-        syslogHandle = null;
+        if (syslogTimer) { clearTimeout(syslogTimer); syslogTimer = null; }
         syslogSection.classList.remove('visible');
     }
 

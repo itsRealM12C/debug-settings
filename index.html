@@ -1,106 +1,491 @@
 <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Settings</title>
+    <script>
+        (function() {
+            var ua = navigator.userAgent || '';
+            var m = ua.match(/Chrom(?:e|ium)\/([0-9]+)\./i);
+            if (m) {
+                var v = parseInt(m[1], 10);
+                document.documentElement.className += v >= 79 ? ' chrome-79-up' : ' chrome-old';
+            }
+        })();
+    </script>
+    <style>
+        @font-face { font-family: 'Miso';      src: url('Miso.ttf')      format('truetype'); }
+        @font-face { font-family: 'MuseoSans'; src: url('MuseoSans.ttf') format('truetype'); }
 
-<hr style="height:1px;border-width:0;color:gray;background-color:gray">
-<body bgcolor="#000000">
-<font size="50">
-<h1 style="font-family:Miso">
-<text>DEBUG SETTINGS</text>
+        *, *::before, *::after { box-sizing: border-box; }
 
+        body {
+            margin: 0; padding: 0;
+            background: #000; color: #fff;
+            font-family: 'MuseoSans', 'Helvetica Neue', Arial, sans-serif;
+            user-select: none; -webkit-user-select: none;
+            overflow-x: hidden;
+        }
 
-<font familiy="Miso"></font>
-<body text="#ffffff" link="#ff0000" vlink="#ff0000" alink="#ff0000">
-<hr style="height:4px;border-width:0;color:gray;background-color:gray">
-<font familiy="Museo Sans">
-<font familiy="Museo Sans">
-<font size="6">
-<font face="Museo Sans">Enable Apps (and also hidden system apps too.)</font>
+        /* Header */
+        .header-hr  { height: 1px; border: none; background: #666; margin: 0; }
+        .main-title {
+            font-family: 'Miso', sans-serif;
+            font-size: 80px; margin: 8px 16px 6px;
+            letter-spacing: -2px; text-transform: uppercase; line-height: 1;
+        }
+        .separator-hr { height: 4px; border: none; background: #666; margin: 0 0 18px; }
 
-<font familiy="Museo Sans">
-<font style="font familiy="Museo Sans">
+        /* Close */
+        .close-btn {
+            position: absolute; right: 20px; top: 12px;
+            width: 44px; height: 44px; border: none; background: transparent;
+            color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center;
+            z-index: 3000; -webkit-tap-highlight-color: transparent; border-radius: 4px;
+        }
+        .close-btn svg { pointer-events: none; }
+        .close-btn.is-focused, .close-btn:focus { outline: none; background: rgba(255,255,255,0.1); }
 
+        /* Nav rows */
+        .nav-button {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 4px 16px; margin-bottom: 10px;
+            border-radius: 6px; cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .nav-button.is-focused, .nav-button:focus {
+            background: #ff006f !important; border-radius: 0; outline: none;
+        }
+        .setting-label {
+            font-size: 24px; color: #fff; margin: 0;
+            flex-grow: 1; margin-right: 16px; line-height: 32px;
+        }
 
-<style>
-.switch {
-  position: relative;
-  display: inline-block;
-  width: 60px;
-  height: 34px;
-}
+        /* Toggle */
+        .toggle-switch-wrapper { position: relative; display: inline-block; }
+        .toggle-switch-wrapper input { opacity: 0; width: 0; height: 0; position: absolute; }
+        .slider {
+            display: block; width: 60px; height: 28px;
+            background: #333; border-radius: 50px; position: relative;
+            cursor: pointer; transition: background 0.15s;
+        }
+        .slider::before {
+            content: ''; position: absolute;
+            width: 20px; height: 20px; left: 4px; bottom: 4px;
+            background: #888; border-radius: 50%;
+            transition: transform 0.15s, background 0.15s;
+        }
+        .toggle-switch-wrapper input:checked + .slider { background: #fff; }
+        .toggle-switch-wrapper input:checked + .slider::before { background: #ff006f; transform: translateX(32px); }
 
-.switch input { 
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
+        /* Apps section */
+        #appsSection {
+            display: none; flex-direction: row; flex-wrap: wrap;
+            gap: 20px; padding: 8px 16px 16px;
+        }
+        #appsSection.visible { display: flex; }
+        .app-item {
+            display: flex; flex-direction: column; align-items: center;
+            text-align: center; padding: 6px; border-radius: 4px;
+            cursor: pointer; min-width: 90px;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .app-item.is-focused, .app-item:focus { background: #ff006f !important; outline: none; }
+        .app-icon {
+            width: 80px; height: 80px; object-fit: cover;
+            border-radius: 8px; margin-bottom: 6px; background: #1e1e1e;
+        }
+        .app-description {
+            font-size: 13px; color: #fff; max-width: 88px;
+            word-break: break-word; margin: 0;
+        }
 
-.slider:before {
-  position: absolute;
-  content: "";
-  height: 26px;
-  width: 26px;
-  left: 4px;
-  bottom: 4px;
-  background-color: white;
-  -webkit-transition: .15s;
-  transition: .15s;
-}
+        /* Loading spinner */
+        #loadingSpinner {
+            display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            align-items: center; justify-content: center;
+            background: rgba(0,0,0,0.55); z-index: 9999;
+        }
+        #loadingSpinner.visible { display: flex; }
+        .loading-gif { width: 48px; height: 48px; object-fit: contain; }
 
+        /* Syslog */
+        #syslogSection { display: none; flex-direction: column; margin: 0 16px 8px; }
+        #syslogSection.visible { display: flex; }
+        .log-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+        #logFilter {
+            flex: 1; padding: 5px 8px; border-radius: 6px;
+            border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.07);
+            color: #fff; font-family: monospace; font-size: 12px;
+            user-select: text; -webkit-user-select: text; outline: none;
+        }
+        #clearLogs {
+            padding: 5px 12px; border-radius: 6px; background: #222;
+            color: #fff; border: none; cursor: pointer; font-size: 13px;
+        }
+        #clearLogs:focus, #clearLogs:hover { background: #fff; color: #000; outline: none; }
+        #logViewport {
+            max-height: 220px; overflow-y: auto;
+            background: rgba(0,0,0,0.6); border-radius: 6px; padding: 8px;
+            font-family: monospace; font-size: 11px; color: #e6e6e6; line-height: 1.5;
+        }
+        #logViewport div { white-space: pre-wrap; word-break: break-all; }
+        #logViewport .log-err  { color: #ff5555; }
+        #logViewport .log-warn { color: #ffb347; }
 
-.slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: #ccc;
-  -webkit-transition: .4s;
-  transition: .15s;
+        /* Footer */
+        .description-label {
+            position: fixed; left: 16px; right: 16px; bottom: 52px;
+            font-size: 13px; color: #888; margin: 0; z-index: 100;
+        }
+        .description-text {
+            position: fixed; left: 16px; right: 16px; bottom: 18px;
+            font-size: 17px; color: #fff; margin: 0; z-index: 100;
+        }
 
-}
-
-input:checked + .slider {
-  background-color: #e01958;
-}
-
-input:focus + .slider {
-  box-shadow: 0 0 0px #e01958;
-}
-
-input:checked + .slider:before {
-  -webkit-transform: translateX(26px);
-  -ms-transform: translateX(26px);
-  transform: translateX(26px);
-}
-
-/* Rounded sliders */
-.slider.round {
-  border-radius: 50px;
-}
-
-.slider.round:before {
-  border-radius: 75%;
-}
-</style>
+        .setting-group { padding-bottom: 90px; }
+        .hidden { display: none !important; }
+    </style>
 </head>
 <body>
 
+<hr class="header-hr">
+<h1 class="main-title">Debug Settings</h1>
 
-<label class="switch">
-  <input type="checkbox" unchecked>
-  <span class="slider round">
-</label>
-<p></p>
-<p></p>
-<p></p>
-<p></p>
-<br>
-<font size="2">
-<font color="gray">
-<font face="Museo Sans">Short description</font>
-<p>
-<font size="4">
-<font color="white">
-<font face="Museo Sans">If you enable it, Pressing home, and you will see the apps for example: Screen Share</font>
+<button class="close-btn nav-button" id="closeBtn" tabindex="0" aria-label="Close">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M6 6L18 18M6 18L18 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+    </svg>
+</button>
 
+<hr class="separator-hr">
 
+<div class="setting-group">
+
+    <!-- Enable Apps toggle -->
+    <label class="setting-item-row nav-button" for="enableAppsToggle" tabindex="0">
+        <p class="setting-label">Enable Apps (and also hidden system apps too.)</p>
+        <div class="toggle-switch-wrapper">
+            <input type="checkbox" id="enableAppsToggle" tabindex="-1">
+            <span class="slider round"></span>
+        </div>
+    </label>
+    <div id="appsSection"></div>
+
+    <!-- Syslog toggle -->
+    <label class="setting-item-row nav-button" for="enableDebugToggle" tabindex="0">
+        <p class="setting-label">Enable Debug Logs</p>
+        <div class="toggle-switch-wrapper">
+            <input type="checkbox" id="enableDebugToggle" tabindex="-1">
+            <span class="slider round"></span>
+        </div>
+    </label>
+    <div id="syslogSection">
+        <div class="log-toolbar">
+            <input id="logFilter" placeholder="Filter (e.g. surface-manager)">
+            <button id="clearLogs">Clear</button>
+        </div>
+        <div id="logViewport"></div>
+    </div>
+
+    <p class="description-label">Short description</p>
+    <p class="description-text">If you enable it, Pressing home, and you will see the apps for example: Screen Share</p>
+</div>
+
+<div id="loadingSpinner">
+    <img class="loading-gif" src="7-10.gif" alt="Loading">
+</div>
+
+<!-- Polyfills + helpers -->
+<script>
+    if (!Element.prototype.matches) Element.prototype.matches = Element.prototype.msMatchesSelector || Element.prototype.webkitMatchesSelector;
+    if (!Element.prototype.closest) Element.prototype.closest = function(s) { var el=this; do { if(el.matches(s)) return el; el=el.parentElement; } while(el); return null; };
+    if (window.NodeList && !NodeList.prototype.forEach) NodeList.prototype.forEach = Array.prototype.forEach;
+
+    function on(el,ev,fn,cap){ if(!el)return; el.addEventListener?el.addEventListener(ev,fn,!!cap):(el.attachEvent?el.attachEvent('on'+ev,fn):(el['on'+ev]=fn)); }
+    function q(s,r)   { return (r||document).querySelector(s); }
+    function qAll(s,r){ return Array.prototype.slice.call((r||document).querySelectorAll(s)); }
+    function addClass(el,c)   { if(!el||el.className.indexOf(c)!==-1)return; el.className=(el.className+' '+c).replace(/\s+/g,' ').trim(); }
+    function removeClass(el,c){ if(!el)return; el.className=el.className.replace(new RegExp('(\\s|^)'+c+'(\\s|$)'),' ').replace(/\s+/g,' ').trim(); }
+</script>
+
+<script src="webOSTV.js"></script>
+
+<script>
+(function() {
+
+    /* ── Elements ── */
+    var appsSection      = q('#appsSection');
+    var syslogSection    = q('#syslogSection');
+    var loadingSpinner   = q('#loadingSpinner');
+    var enableAppsToggle = q('#enableAppsToggle');
+    var enableDebugToggle= q('#enableDebugToggle');
+    var logViewport      = q('#logViewport');
+    var logFilter        = q('#logFilter');
+
+    /* ── Pick loading gif by Chrome version ── */
+    (function(){
+        var m=(navigator.userAgent||'').match(/Chrom(?:e|ium)\/([0-9]+)\./i);
+        var gif='7-10.gif';
+        if(m){ var v=parseInt(m[1],10); gif=v>=79?'7-10.gif':v>=39?'4-6.gif':'1-2.gif'; }
+        var img=q('.loading-gif'); if(img) img.src=gif;
+    })();
+
+    /* ══════════════════════════════════════
+       ENABLE APPS — real listApps via Luna
+       ══════════════════════════════════════ */
+
+    function loadApps() {
+        loadingSpinner.classList.add('visible');
+        if (!window.webOS || !window.webOS.service) {
+            loadingSpinner.classList.remove('visible');
+            showNoApps('webOS service not available.');
+            return;
+        }
+        window.webOS.service.request('luna://com.webos.applicationManager', {
+            method: 'listApps',
+            parameters: {},
+            onSuccess: function(res) {
+                loadingSpinner.classList.remove('visible');
+                renderApps(res.apps || []);
+            },
+            onFailure: function(err) {
+                loadingSpinner.classList.remove('visible');
+                showNoApps('listApps failed: ' + (err.errorText || JSON.stringify(err)));
+            }
+        });
+    }
+
+    function showNoApps(msg) {
+        appsSection.innerHTML = '';
+        var p = document.createElement('p');
+        p.style.cssText = 'color:#888;font-size:16px;padding:0 0 8px;margin:0;';
+        p.textContent = msg;
+        appsSection.appendChild(p);
+        appsSection.classList.add('visible');
+    }
+
+    function renderApps(apps) {
+        appsSection.innerHTML = '';
+        if (!apps.length) { showNoApps('No apps returned.'); return; }
+
+        apps.forEach(function(app) {
+            var div = document.createElement('div');
+            div.className = 'app-item nav-button';
+            div.tabIndex = 0;
+            div.setAttribute('data-app-id', app.id);
+
+            var img = document.createElement('img');
+            img.className = 'app-icon';
+            img.alt = app.title || app.id;
+            img.src = app.largeIcon || app.icon || app.smallIcon || '';
+            img.onerror = function() { img.style.background = '#1e1e1e'; img.removeAttribute('src'); };
+
+            var label = document.createElement('p');
+            label.className = 'app-description';
+            label.textContent = app.title || app.id;
+
+            div.appendChild(img);
+            div.appendChild(label);
+
+            on(div, 'focus', function() { addClass(div, 'is-focused'); });
+            on(div, 'blur',  function() { removeClass(div, 'is-focused'); });
+            on(div, 'click', function() { launchApp(app.id); });
+
+            appsSection.appendChild(div);
+        });
+
+        appsSection.classList.add('visible');
+        var first = appsSection.querySelector('.app-item');
+        if (first) { try { first.focus(); addClass(first, 'is-focused'); } catch(e) {} }
+    }
+
+    function launchApp(id) {
+        if (!window.webOS || !window.webOS.service) return;
+        window.webOS.service.request('luna://com.webos.applicationManager', {
+            method: 'launch',
+            parameters: { id: id },
+            onSuccess: function() { console.log('Launched: ' + id); },
+            onFailure: function(e) { console.error('Launch failed: ' + JSON.stringify(e)); }
+        });
+    }
+
+    on(enableAppsToggle, 'change', function() {
+        if (enableAppsToggle.checked) {
+            loadApps();
+        } else {
+            appsSection.classList.remove('visible');
+            appsSection.innerHTML = '';
+        }
+    });
+
+    /* ══════════════════════════════════════
+       REAL SYSLOG
+       Tries luna://com.webos.pmlogd/getLogData (subscribe) first,
+       falls back to luna://com.webos.service.systemservice/logRead.
+       ══════════════════════════════════════ */
+
+    var syslogActive = false;
+    var syslogHandle = null;
+    var MAX_LINES    = 600;
+
+    function appendLog(line) {
+        var filter = (logFilter.value || '').trim().toLowerCase();
+        var div = document.createElement('div');
+        var lower = line.toLowerCase();
+        if (lower.indexOf('[err') !== -1 || lower.indexOf('error') !== -1) div.className = 'log-err';
+        else if (lower.indexOf('[warn') !== -1 || lower.indexOf('warning') !== -1) div.className = 'log-warn';
+        div.textContent = line;
+        if (filter && lower.indexOf(filter) === -1) div.style.display = 'none';
+        logViewport.appendChild(div);
+        while (logViewport.children.length > MAX_LINES) logViewport.removeChild(logViewport.firstChild);
+        logViewport.scrollTop = logViewport.scrollHeight;
+    }
+
+    function flushPayload(res) {
+        if (!syslogActive) return;
+        var raw = res.logData || res.lines || res.logMsg || res.message || res.payload || null;
+        if (!raw) { appendLog(JSON.stringify(res)); return; }
+        if (typeof raw === 'string') {
+            raw.split('\n').forEach(function(l) { if (l.trim()) appendLog(l); });
+        } else if (Array.isArray(raw)) {
+            raw.forEach(function(l) { appendLog(typeof l === 'string' ? l : JSON.stringify(l)); });
+        } else {
+            appendLog(JSON.stringify(raw));
+        }
+    }
+
+    function startSyslog() {
+        syslogSection.classList.add('visible');
+        syslogActive = true;
+
+        if (!window.webOS || !window.webOS.service) {
+            appendLog('[WARN] webOS service not available — cannot stream real syslog.');
+            return;
+        }
+
+        /* Try pmlogd first, fall back to systemservice */
+        syslogHandle = window.webOS.service.request('luna://com.webos.pmlogd', {
+            method: 'getLogData',
+            parameters: { subscribe: true, numLines: 100 },
+            subscribe: true,
+            onSuccess: function(res) { flushPayload(res); },
+            onFailure: function(err) {
+                appendLog('[WARN] pmlogd: ' + (err.errorText || err.errorCode || JSON.stringify(err)) + ' — trying systemservice…');
+                syslogHandle = window.webOS.service.request('luna://com.webos.service.systemservice', {
+                    method: 'logRead',
+                    parameters: { subscribe: true },
+                    subscribe: true,
+                    onSuccess: function(res) { flushPayload(res); },
+                    onFailure: function(err2) {
+                        appendLog('[ERR] Both syslog methods failed: ' + (err2.errorText || JSON.stringify(err2)));
+                    }
+                });
+            }
+        });
+    }
+
+    function stopSyslog() {
+        syslogActive = false;
+        if (syslogHandle && syslogHandle.cancel) try { syslogHandle.cancel(); } catch(e) {}
+        syslogHandle = null;
+        syslogSection.classList.remove('visible');
+    }
+
+    on(enableDebugToggle, 'change', function() {
+        if (enableDebugToggle.checked) startSyslog(); else stopSyslog();
+    });
+
+    on(logFilter, 'input', function() {
+        var filter = (logFilter.value || '').trim().toLowerCase();
+        qAll('div', logViewport).forEach(function(div) {
+            div.style.display = (!filter || div.textContent.toLowerCase().indexOf(filter) !== -1) ? '' : 'none';
+        });
+    });
+
+    on(q('#clearLogs'), 'click', function() { logViewport.innerHTML = ''; });
+
+    /* ══════════════════════════════════════
+       D-PAD NAVIGATION
+       ══════════════════════════════════════ */
+
+    var navIdx = 0;
+
+    function getNavBtns() {
+        return qAll('.nav-button').filter(function(el) {
+            var cur = el;
+            while (cur && cur !== document.body) {
+                if (cur.style && cur.style.display === 'none') return false;
+                if (cur.classList && cur.classList.contains('hidden')) return false;
+                cur = cur.parentElement;
+            }
+            return el.offsetWidth > 0 || el.offsetHeight > 0;
+        });
+    }
+
+    on(document, 'focus', function(e) {
+        var t = e.target || e.srcElement;
+        if (t && typeof t.className === 'string' && t.className.indexOf('nav-button') !== -1) addClass(t, 'is-focused');
+    }, true);
+    on(document, 'blur', function(e) {
+        var t = e.target || e.srcElement; if (t) removeClass(t, 'is-focused');
+    }, true);
+
+    on(document, 'keydown', function(e) {
+        e = e || window.event;
+        var code = e.keyCode || e.which;
+        var btns = getNavBtns(); if (!btns.length) return;
+        var active = document.activeElement;
+        for (var i = 0; i < btns.length; i++) if (btns[i] === active) { navIdx = i; break; }
+
+        var kUp    = code === 38 || code === 103;
+        var kDown  = code === 40 || code === 108;
+        var kLeft  = code === 37 || code === 105;
+        var kRight = code === 39 || code === 106;
+        var kEnter = code === 13 || code === 28;
+
+        if (kUp || kDown || kLeft || kRight) {
+            if (e.preventDefault) e.preventDefault(); else e.returnValue = false;
+            var next = navIdx;
+            if (kUp || kLeft)    next = Math.max(0, navIdx - 1);
+            if (kDown || kRight) next = Math.min(btns.length - 1, navIdx + 1);
+            if (next !== navIdx) {
+                removeClass(btns[navIdx], 'is-focused');
+                navIdx = next;
+                try { btns[navIdx].focus(); addClass(btns[navIdx], 'is-focused'); } catch(ex) {}
+            }
+        } else if (kEnter) {
+            if (e.preventDefault) e.preventDefault(); else e.returnValue = false;
+            var btn = btns[navIdx]; if (!btn) return;
+            if ((btn.tagName || '').toUpperCase() === 'LABEL') {
+                var cb = q('input[type="checkbox"]', btn);
+                if (cb) {
+                    cb.checked = !cb.checked;
+                    var ev2 = document.createEvent('Event');
+                    ev2.initEvent('change', true, true);
+                    cb.dispatchEvent(ev2);
+                }
+            } else {
+                if (btn.click) btn.click();
+            }
+        }
+    });
+
+    on(q('#closeBtn'), 'click', function() {
+        if (window.webOS && window.webOS.platformBack) window.webOS.platformBack();
+        else try { window.history.back(); } catch(e) {}
+    });
+
+    on(window, 'load', function() {
+        setTimeout(function() {
+            var btns = getNavBtns();
+            if (btns.length) { try { btns[0].focus(); addClass(btns[0], 'is-focused'); } catch(e) {} }
+        }, 100);
+    });
+
+})();
+</script>
+
+</body>
+</html>

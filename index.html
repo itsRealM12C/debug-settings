@@ -253,19 +253,33 @@
 
     function loadApps() {
         loadingSpinner.classList.add('visible');
-        /* Ask the TV for the full app list via luna-send as root through hbchannel.
-           luna-send -n 1 -f returns a pretty-printed JSON response. */
+        /* Use luna-send without -f (compact JSON) to reduce output size and avoid truncation.
+           folderPath gives us the install dir so we can build a file:// icon URL. */
         hbExec(
-            "luna-send -n 1 -f luna://com.webos.applicationManager/listApps '{}'",
+            "luna-send -n 1 luna://com.webos.applicationManager/listApps '{}'",
             function(out, err) {
                 loadingSpinner.classList.remove('visible');
                 if (err) { showNoApps('hbchannel exec failed: ' + err); return; }
+                /* Output may be prefixed with shell noise — find the first '{' */
+                var jsonStart = (out || '').indexOf('{');
+                if (jsonStart === -1) { showNoApps('No JSON in output: ' + (out||'').substr(0,200)); return; }
                 try {
-                    var res = JSON.parse(out);
-                    if (!res.returnValue) { showNoApps('listApps returned false: ' + (res.errorText || out)); return; }
+                    var res = JSON.parse(out.slice(jsonStart));
+                    if (!res.returnValue) { showNoApps('listApps error: ' + (res.errorText || JSON.stringify(res))); return; }
                     renderApps(res.apps || []);
                 } catch(e) {
-                    showNoApps('Parse error: ' + e.message + '\nRaw: ' + (out||'').substr(0,200));
+                    /* Truncated — try to recover partial array */
+                    var arrStart = out.indexOf('"apps"');
+                    if (arrStart !== -1) {
+                        try {
+                            var partial = out.slice(out.indexOf('[', arrStart));
+                            /* close any unclosed JSON */
+                            partial = partial.replace(/,\s*$/, '') + (partial.trim().slice(-1) !== ']' ? ']' : '');
+                            renderApps(JSON.parse(partial));
+                            return;
+                        } catch(e2) {}
+                    }
+                    showNoApps('Parse error: ' + e.message);
                 }
             }
         );
@@ -293,7 +307,10 @@
             var img = document.createElement('img');
             img.className = 'app-icon';
             img.alt = app.title || app.id;
-            img.src = app.largeIcon || app.icon || app.smallIcon || '';
+            /* icon/largeIcon are filenames relative to the app's folderPath */
+            var folder = (app.folderPath || '').replace(/\/$/, '');
+            var iconFile = app.largeIcon || app.icon || '';
+            img.src = (folder && iconFile) ? ('file://' + folder + '/' + iconFile) : '';
             img.onerror = function() { img.style.background = '#1e1e1e'; img.removeAttribute('src'); };
 
             var label = document.createElement('p');
